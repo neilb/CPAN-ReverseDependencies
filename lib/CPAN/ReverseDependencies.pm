@@ -4,70 +4,28 @@ package CPAN::ReverseDependencies;
 use 5.006;
 use strict;
 use warnings;
-use Moo;
-use Carp;
-use MetaCPAN::API;
+use MetaCPAN::Client;
 
-my $SLICE_SIZE = 100;
-
-has ua => (
-           is      => 'ro',
-           default => sub { MetaCPAN::API->new() },
-          );
-
+sub new {
+    return bless {}, shift;
+}
 sub get_reverse_dependencies
 {
     my $self     = shift;
     my $distname = shift;
-    my @deps;
-    my $offset = 0;
-    my @deps_slice;
 
-    do {
-        @deps_slice = $self->_get_dependency_slice($distname, $offset);
-        push(@deps, @deps_slice);
-        $offset += scalar @deps_slice;
-    } while (@deps_slice == $SLICE_SIZE);
+    my $mcpan = MetaCPAN::Client->new;
+    my $rs = $mcpan->reverse_dependencies($distname);
 
-    return @deps;
-}
+    my @dists;
 
-sub _get_dependency_slice
-{
-    my $self     = shift;
-    my $distname = shift;
-    my $offset   = shift;
-    my $result;
-
-    eval {
-
-        $result = $self->ua->post('/search/reverse_dependencies/'.$distname,
-                {
-                    query => {
-                        filtered => {
-                          query  => { 'match_all' => {} },
-                          filter => {
-                            and => [
-                              { term => { 'release.status'     => 'latest' } },
-                              { term => { 'release.authorized' => \1 } },
-                            ],
-                          },
-                        },
-                    },
-                    size => $SLICE_SIZE,
-                    from => $offset,
-                });
-
-    };
-
-    if ($@) {
-        croak "Failed to get reverse dependencies for $distname: $@";
+    while (my $release = $rs->next){
+        push @dists, $release->distribution;
     }
-
-    my @dists = map { $_->{_source}->{metadata}->{name} } @{ $result->{hits}->{hits} };
-
     return @dists;
 }
+
+*revdeps = \&get_reverse_dependencies;
 
 1;
 
@@ -78,9 +36,16 @@ CPAN::ReverseDependencies - given a CPAN dist name, find other CPAN dists that u
 =head1 SYNOPSIS
 
  use CPAN::ReverseDependencies;
- 
- my $revua = CPAN::ReverseDependencies->new();
- my @deps  = $revua->get_reverse_dependencies('Module-Path');
+
+ my $crd = CPAN::ReverseDependencies->new();
+
+ my $module = 'Module-Path'; # or 'Module::Path'
+
+ my @revdeps  = $crd->get_reverse_dependencies($module);
+
+ # short-form alias
+
+ my @revdeps = $crd->revdeps($module);
 
 =head1 DESCRIPTION
 
